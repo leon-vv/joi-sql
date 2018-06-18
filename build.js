@@ -1,4 +1,6 @@
 var toCamelCase = require('to-camel-case')
+var mysqlInt = require('./mysql-interface.js')
+
 
 function ifValThen(column, property, value, then) {
 	var equal = Array.isArray(value) ? value.some(function(value) { return column[property] === value}) : column[property] === value
@@ -6,16 +8,16 @@ function ifValThen(column, property, value, then) {
 	return equal ? then : ''
 }
 
-var maxIntValues = {
-	tinyint: 255,
-	smallint: 65535,
-	mediumint: 16777215,
-	int: 4294967295,
-	bigint: 18446744073709551615
+// Number of bytes mapped to signed integer range
+function bytesToSignedRange(num) {
+    const min = -Math.pow(2, num - 1);
+    const max = Math.pow(2, num - 1) - 1;
+    return [min, max];
 }
 
-function getSignedValue(num) {
-	return (num - 1) / 2
+function bytesToUnsignedRange(num) {
+    const max = Math.pow(2, num) - 1;
+    return [0, max];
 }
 
 function decimalLessThan(precision) {
@@ -29,18 +31,23 @@ function unrollEnum(col) {
 var checks = [
 
 	function intCheck(column) {
+    
 		var checks = ''
-		if (maxIntValues[column.dataType]) {
+        var bytes = mysqlInt.intToBytes[column.dataType];
+
+		if (bytes) {
+
 			checks += '.number().integer()'
-
-			var min = 0
-			var max = maxIntValues[column.dataType]
+            
 			if (column.columnType.indexOf('unsigned') === -1) {
-				max = getSignedValue(max)
-				min = -1 * (max + 1)
+			    let [min, max] = bytesToSignedRange(bytes);
+                checks += '.max(' + max + ').min(' + min + ')'
 			}
+            else {
+                let [min, max] = bytesToUnsignedRange(bytes);
+                checks += '.max(' + max + ').min(' + min + ')'
+            }
 
-			checks += '.max(' + max + ').min(' + min + ')'
 		}
 
 		return checks
