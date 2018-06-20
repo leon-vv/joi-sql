@@ -1,6 +1,4 @@
 var toCamelCase = require('to-camel-case')
-var mysqlInt = require('./mysql-interface.js')
-
 
 function ifValThen(column, property, value, then) {
 	var equal = Array.isArray(value) ? value.some(function(value) { return column[property] === value}) : column[property] === value
@@ -10,13 +8,15 @@ function ifValThen(column, property, value, then) {
 
 // Number of bytes mapped to signed integer range
 function bytesToSignedRange(num) {
-    const min = -Math.pow(2, num - 1);
-    const max = Math.pow(2, num - 1) - 1;
+    const bits = num * 8;
+    const min = -Math.pow(2, bits - 1);
+    const max = Math.pow(2, bits - 1) - 1;
     return [min, max];
 }
 
 function bytesToUnsignedRange(num) {
-    const max = Math.pow(2, num) - 1;
+    const bits = num * 8;
+    const max = Math.pow(2, bits) - 1;
     return [0, max];
 }
 
@@ -30,20 +30,21 @@ function unrollEnum(col) {
 
 var checks = [
 
-	function intCheck(column) {
+	function intCheck(intf, column) {
     
 		var checks = ''
-        var bytes = mysqlInt.intToBytes[column.dataType];
+        var bytes = intf.intToBytes[column.dataType];
 
 		if (bytes) {
 
 			checks += '.number().integer()'
             
-			if (column.columnType.indexOf('unsigned') === -1) {
+			if (!intf.hasUnsigned) { 
 			    let [min, max] = bytesToSignedRange(bytes);
                 checks += '.max(' + max + ').min(' + min + ')'
 			}
-            else {
+            else if(column.columnType.indexOf('unsigned') !== -1) {
+
                 let [min, max] = bytesToUnsignedRange(bytes);
                 checks += '.max(' + max + ').min(' + min + ')'
             }
@@ -53,31 +54,36 @@ var checks = [
 		return checks
 	},
 
-	function dateCheck(column) {
+	function dateCheck(intf, column) {
 		return ifValThen(column, 'dataType', ['datetime', 'date', 'timestamp'], '.date()')
 	},
 
-	function stringCheck(column) {
-		return ifValThen(column, 'dataType', ['text', 'varchar', 'char'], '.string().max(' + column.characterMaximumLength + ')')
+	function stringCheck(intf, column) {
+	    const max = column.characterMaximumLength ? '.max(' + column.characterMaximumLength + ')' : '';
+
+		return ifValThen(column, 'dataType', ['text', 'varchar', 'char', 'character', 'character varying'], '.string()' + max)
 	},
 
-	function boolCheck(column) {
-		return (column.dataType === 'bit' && column.numericPrecision == '1') ? '.boolean()' : ''
+	function boolCheck(intf, column) {
+	    let isBool = column.dataType === 'bit' && column.numericPrecision == '1';
+	    isBool |= column.dataType === 'boolean';
+
+		return isBool ? '.boolean()' : ''
 	},
 
-	function decimalCheck(column) {
+	function decimalCheck(intf, column) {
 		return ifValThen(column, 'dataType', 'decimal', '.number().precision('
 			+ column.numericScale + ').less(' + decimalLessThan(column.numericPrecision - column.numericScale) + ')')
 	},
 
-	function enumCheck(column) {
+	function enumCheck(intf, column) {
 		if (column.dataType === 'enum') {
 			return '.any().valid(' + unrollEnum(column) + ')'
 		}
 		return ''
 	},
 
-	function nullableCheck(column) {
+	function nullableCheck(intf, column) {
 		if (column.isNullable === 'YES') {
 			return '.allow(null)'
 		} else if (column.isNullable === 'NO') {
@@ -87,11 +93,12 @@ var checks = [
 
 ]
 
-module.exports = function(columns, camelCaseProperties) {
+module.exports = function(intf, columns, camelCaseProperties) {
+
 	return 'Joi.object({\n\t' + columns.map(function(column) {
 		var property = camelCaseProperties ? toCamelCase(column.columnName) : column.columnName
 		return property + ': Joi' + checks.map(function(check) {
-			return check(column)
+			return check(intf, column)
 		}).join('')
 	}).join(',\n\t') + '\n})'
 }

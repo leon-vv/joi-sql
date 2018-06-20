@@ -30,6 +30,7 @@
     "camelize": "^1.0.0",
     "minimist": "^1.1.1",
     "mysql": "^2.6.2",
+    "pg": "^7",
     "p-finally": "1.0.0",
     "sql-concat": "^1.0.0",
     "to-camel-case": "^0.2.1"
